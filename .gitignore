@@ -1,0 +1,25 @@
+# Gradle, Kotlin and native build outputs
+.gradle/
+.kotlin/
+**/build/
+**/.cxx/
+**/.externalNativeBuild/
+
+# Local SDK, IDE and signing configuration
+local.properties
+.idea/
+*.iml
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+
+# Local captures, research and OS metadata
+/captures/
+/app/release/
+/.local-research/
+*.hprof
+.DS_Store
+
+# Python CI helpers
+__pycache__/

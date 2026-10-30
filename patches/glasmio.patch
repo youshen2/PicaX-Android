@@ -1,0 +1,79 @@
+diff --git a/glasmio-glass/src/main/java/io/github/neoruaa/glasmio/glass/GlassBackdrop.kt b/glasmio-glass/src/main/java/io/github/neoruaa/glasmio/glass/GlassBackdrop.kt
+index ad2d2a6..bd6f8e2 100644
+--- a/glasmio-glass/src/main/java/io/github/neoruaa/glasmio/glass/GlassBackdrop.kt
++++ b/glasmio-glass/src/main/java/io/github/neoruaa/glasmio/glass/GlassBackdrop.kt
+@@ -333,7 +333,7 @@ private class SharedGlassBackdrop(
+         coordinates: LayoutCoordinates?,
+         layerBlock: (GraphicsLayerScope.() -> Unit)?,
+     ) {
+-        with(base) { drawBackdrop(density, coordinates, layerBlock) }
++        if (base !== source) with(base) { drawBackdrop(density, coordinates, layerBlock) }
+         with(sample(density, coordinates, 0f)) { drawBackdrop(density, coordinates, layerBlock) }
+     }
+ 
+@@ -342,7 +342,7 @@ private class SharedGlassBackdrop(
+         coordinates: LayoutCoordinates,
+         viewport: Rect,
+     ) {
+-        with(base) { drawBackdrop(density, coordinates, null) }
++        if (base !== source) with(base) { drawBackdrop(density, coordinates, null) }
+         with(sample(density, coordinates, viewport.top)) { drawBackdrop(density, coordinates, null) }
+     }
+ }
+diff --git a/glasmio-glass/src/main/java/io/github/neoruaa/glasmio/glass/ProgressiveBackdropBlur.kt b/glasmio-glass/src/main/java/io/github/neoruaa/glasmio/glass/ProgressiveBackdropBlur.kt
+index f775f33..2a1b9cf 100644
+--- a/glasmio-glass/src/main/java/io/github/neoruaa/glasmio/glass/ProgressiveBackdropBlur.kt
++++ b/glasmio-glass/src/main/java/io/github/neoruaa/glasmio/glass/ProgressiveBackdropBlur.kt
+@@ -179,7 +179,7 @@ fun Modifier.progressiveBlurBackdrop(
+     backdrop: Backdrop,
+     progress: Float,
+     maxRadius: Dp = 10.dp,
+-): Modifier = graphicsLayer {
++): Modifier = if (progress <= 0f) this else graphicsLayer {
+     alpha = progress.coerceIn(0f, 1f)
+ }.drawPlainBackdrop(
+     backdrop = backdrop,
+diff --git a/glasmio-glass/src/main/java/io/github/neoruaa/glasmio/glass/render/backdrops/LayerBackdrop.kt b/glasmio-glass/src/main/java/io/github/neoruaa/glasmio/glass/render/backdrops/LayerBackdrop.kt
+index a0f3a29..51a0fef 100644
+--- a/glasmio-glass/src/main/java/io/github/neoruaa/glasmio/glass/render/backdrops/LayerBackdrop.kt
++++ b/glasmio-glass/src/main/java/io/github/neoruaa/glasmio/glass/render/backdrops/LayerBackdrop.kt
+@@ -46,6 +46,8 @@ class LayerBackdrop internal constructor(
+     internal val onDraw: ContentDrawScope.() -> Unit
+ ) : Backdrop {
+ 
++    internal val recordsVisibleContent: Boolean = onDraw === DefaultOnDraw
++
+     override val isCoordinatesDependent: Boolean = true
+ 
+     internal var layerCoordinates: LayoutCoordinates? by mutableStateOf(null)
+diff --git a/glasmio-glass/src/main/java/io/github/neoruaa/glasmio/glass/render/backdrops/LayerBackdropModifier.kt b/glasmio-glass/src/main/java/io/github/neoruaa/glasmio/glass/render/backdrops/LayerBackdropModifier.kt
+index 34f3154..5649fb8 100644
+--- a/glasmio-glass/src/main/java/io/github/neoruaa/glasmio/glass/render/backdrops/LayerBackdropModifier.kt
++++ b/glasmio-glass/src/main/java/io/github/neoruaa/glasmio/glass/render/backdrops/LayerBackdropModifier.kt
+@@ -11,6 +11,7 @@ package io.github.neoruaa.glasmio.glass.render.backdrops
+ 
+ import androidx.compose.ui.Modifier
+ import androidx.compose.ui.graphics.drawscope.ContentDrawScope
++import androidx.compose.ui.graphics.layer.drawLayer
+ import androidx.compose.ui.layout.LayoutCoordinates
+ import androidx.compose.ui.node.DrawModifierNode
+ import androidx.compose.ui.node.GlobalPositionAwareModifierNode
+@@ -62,8 +63,16 @@ private class LayerBackdropNode(
+ ) : DrawModifierNode, GlobalPositionAwareModifierNode, Modifier.Node() {
+ 
+     override fun ContentDrawScope.draw() {
+-        drawContent()
+-        recordLayer(this@LayerBackdropNode, backdrop.graphicsLayer) { backdrop.onDraw(this@draw) }
++        if (backdrop.recordsVisibleContent) {
++            // Record once and display that same layer. Replaying drawContent here would
++            // traverse every nested page, image and glass control a second time.
++            recordLayer(this@LayerBackdropNode, backdrop.graphicsLayer) { backdrop.onDraw(this@draw) }
++            drawLayer(backdrop.graphicsLayer)
++        } else {
++            // Custom capture callbacks may intentionally differ from visible content.
++            drawContent()
++            recordLayer(this@LayerBackdropNode, backdrop.graphicsLayer) { backdrop.onDraw(this@draw) }
++        }
+         backdrop.notifySourceRecorded()
+     }
+ 

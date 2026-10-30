@@ -1,0 +1,4 @@
+- 支持 PicACG、JMComic、NHentai、E-Hentai、Hitomi 和绅士漫画。
+- 提供漫画详情、下载、本地导入与多种阅读模式。
+- 补齐平台登录、漫画源设置、分流测速及 Profile。
+- 使用 Glasmio 液态玻璃界面并优化背景采样。

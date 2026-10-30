@@ -1,0 +1,185 @@
+name: Android CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  select_run:
+    name: Avoid duplicate branch and tag builds
+    runs-on: ubuntu-24.04
+    outputs:
+      should_build: ${{ steps.decision.outputs.should_build }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+      - id: decision
+        shell: bash
+        run: |
+          set -euo pipefail
+          should_build=true
+          if [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF" == refs/heads/main ]] && [[ -n "$(git tag --points-at "$GITHUB_SHA" --list 'v*')" ]]; then
+            should_build=false
+          fi
+          echo "should_build=$should_build" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build Android artifacts
+    needs: select_run
+    if: needs.select_run.outputs.should_build == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    outputs:
+      signed: ${{ steps.sign.outputs.signed }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+      - uses: gradle/actions/setup-gradle@4c125117fe7c5aed11272ec4213f602f012f89f2 # v5
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+      - name: Install Android toolchain
+        run: sdkmanager 'platforms;android-37' 'build-tools;37.0.0' 'ndk;27.1.12297006' 'cmake;3.22.1'
+      - name: Validate version and release notes
+        run: python3 .github/scripts/release_metadata.py
+      - name: Test, lint and build
+        env:
+          PICAX_VERSION_CODE: ${{ github.run_number }}
+        run: ./gradlew --no-daemon --max-workers=2 :app:testDebugUnitTest :app:lintDebug :app:assembleRelease
+      - name: Sign Android release
+        id: sign
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ github.event_name != 'pull_request' && secrets.ANDROID_KEYSTORE_BASE64 || '' }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: bash .github/scripts/sign_android.sh
+      - name: Upload Android artifacts
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: PicaX-Android-${{ github.run_number }}
+          path: |
+            build/ci/*.apk
+            build/ci/ReleaseNotes.json
+            build/ci/RELEASE_NOTES.md
+            build/ci/release_body.md
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload reports and R8 mapping
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: PicaX-reports-${{ github.run_number }}
+          path: |
+            app/build/reports/
+            app/build/test-results/
+            app/build/outputs/mapping/release/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') && needs.build.outputs.signed == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: PicaX-Android-${{ github.run_number }}
+          path: release-assets
+      - name: Publish signed APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --notes-file release-assets/release_body.md
+          else
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "PicaX Android $GITHUB_REF_NAME" --notes-file release-assets/release_body.md --verify-tag
+          fi
+          gh release upload "$GITHUB_REF_NAME" release-assets/PicaX.apk --repo "$GITHUB_REPOSITORY" --clobber
+
+  telegram_build:
+    name: Send build to Telegram
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: PicaX-Android-${{ github.run_number }}
+          path: telegram-assets
+      - name: Generate commit summary
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          FALLBACK_SHA: ${{ github.event.before }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 .github/scripts/ci_commit_summary.py \
+            --current-sha "$GITHUB_SHA" --current-run-id "$GITHUB_RUN_ID" \
+            --current-run-number "$GITHUB_RUN_NUMBER" --repository "$GITHUB_REPOSITORY" \
+            --workflow android.yml --fallback-sha "$FALLBACK_SHA" --run-url "$RUN_URL" \
+            --output "$RUNNER_TEMP/telegram-caption.txt"
+      - name: Send Android artifact
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SIGNED: ${{ needs.build.outputs.signed }}
+        run: |
+          apk=telegram-assets/PicaX-unsigned.apk
+          if [[ "$SIGNED" == true ]]; then apk=telegram-assets/PicaX.apk; fi
+          python3 .github/scripts/send_telegram.py --artifact "$apk" --caption "$RUNNER_TEMP/telegram-caption.txt"
+
+  telegram_release:
+    name: Send and pin Telegram release
+    needs: [build, release]
+    if: startsWith(github.ref, 'refs/tags/v') && needs.release.result == 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: PicaX-Android-${{ github.run_number }}
+          path: telegram-assets
+      - name: Generate release caption
+        env:
+          RELEASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ github.ref_name }}
+        run: |
+          python3 .github/scripts/release_telegram_caption.py --project 'PicaX Android' \
+            --version "$GITHUB_REF_NAME" --details-file telegram-assets/RELEASE_NOTES.md \
+            --release-url "$RELEASE_URL" --output "$RUNNER_TEMP/release-caption.txt"
+      - name: Send and pin signed APK
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python3 .github/scripts/send_telegram.py --artifact telegram-assets/PicaX.apk --caption "$RUNNER_TEMP/release-caption.txt" --pin
