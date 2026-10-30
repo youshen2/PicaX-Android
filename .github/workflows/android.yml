@@ -41,8 +41,6 @@ jobs:
     if: needs.select_run.outputs.should_build == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 40
-    outputs:
-      signed: ${{ steps.sign.outputs.signed }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -68,20 +66,18 @@ jobs:
         env:
           PICAX_VERSION_CODE: ${{ github.run_number }}
         run: ./gradlew --no-daemon --max-workers=2 :app:testDebugUnitTest :app:lintDebug :app:assembleRelease
-      - name: Sign Android release
-        id: sign
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ github.event_name != 'pull_request' && secrets.ANDROID_KEYSTORE_BASE64 || '' }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: bash .github/scripts/sign_android.sh
+      - name: Verify and prepare APK
+        run: |
+          set -euo pipefail
+          mkdir -p build/ci
+          cp app/build/outputs/apk/release/app-release.apk build/ci/PicaX.apk
+          "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify build/ci/PicaX.apk
       - name: Upload Android artifacts
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: PicaX-Android-${{ github.run_number }}
           path: |
-            build/ci/*.apk
+            build/ci/PicaX.apk
             build/ci/ReleaseNotes.json
             build/ci/RELEASE_NOTES.md
             build/ci/release_body.md
@@ -102,7 +98,7 @@ jobs:
   release:
     name: Publish GitHub Release
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v') && needs.build.outputs.signed == 'true'
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     permissions:
       actions: read
@@ -155,11 +151,8 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          SIGNED: ${{ needs.build.outputs.signed }}
         run: |
-          apk=telegram-assets/PicaX-unsigned.apk
-          if [[ "$SIGNED" == true ]]; then apk=telegram-assets/PicaX.apk; fi
-          python3 .github/scripts/send_telegram.py --artifact "$apk" --caption "$RUNNER_TEMP/telegram-caption.txt"
+          python3 .github/scripts/send_telegram.py --artifact telegram-assets/PicaX.apk --caption "$RUNNER_TEMP/telegram-caption.txt"
 
   telegram_release:
     name: Send and pin Telegram release

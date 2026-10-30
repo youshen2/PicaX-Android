@@ -57,6 +57,8 @@ cd PicaX-Android
 
 GitHub Actions 在 main 推送、Pull Request、`v*` 标签和手动触发时执行测试、Lint 与 Release 打包，自动初始化 Glasmio submodule。标签版本通过签名校验后发布 APK；main 构建发送 Telegram 通知，正式版发送并置顶。
 
+Debug 与 Release 共用仓库中的 `ci/debug.keystore`，以保持本地构建和 CI 产物的签名一致。Release 保留 R8 与资源压缩，输出可直接安装的 `PicaX.apk`。该文件是公开的 Android debug 签名密钥，密码为 `android`，别名为 `androiddebugkey`。
+
 ## 结构
 
 - `model`：漫画、章节、账号、阅读及下载数据，搜索表达式解析。

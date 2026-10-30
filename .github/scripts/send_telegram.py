@@ -39,8 +39,6 @@ def main():
         if not os.environ.get(name):
             raise SystemExit(f"Missing Actions secret: {name}")
     caption = arguments.caption.read_text(encoding="utf-8").strip()
-    if arguments.artifact.name.endswith("-unsigned.apk"):
-        caption = "Android 未签名构建\n" + caption
     # Bot API captions count UTF-16 code units, including supplementary characters.
     while len(caption.encode("utf-16-le")) // 2 > 1024:
         caption = caption[:-1]

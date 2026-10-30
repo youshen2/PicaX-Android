@@ -23,3 +23,6 @@ signing.properties
 
 # Python CI helpers
 __pycache__/
+
+# Shared Android debug signing identity
+!ci/debug.keystore

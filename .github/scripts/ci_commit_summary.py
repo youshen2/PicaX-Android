@@ -274,7 +274,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--current-run-id", required=True, type=int)
     parser.add_argument("--current-run-number", required=True, type=int)
     parser.add_argument("--repository", required=True)
-    parser.add_argument("--workflow", default="build-unsigned.yml")
+    parser.add_argument("--workflow", default="android.yml")
     parser.add_argument("--fallback-sha", default="")
     parser.add_argument("--previous-sha")
     parser.add_argument("--run-url", required=True)
