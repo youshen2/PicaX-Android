@@ -21,7 +21,6 @@ alt="Get it on GitHub" align="center" height="80" /></a>
 
 <p>
   <img src="docs/screenshots/home.png" alt="首页与最近阅读" width="240" />
-  <img src="docs/screenshots/library.png" alt="本地收藏列表" width="240" />
   <img src="docs/screenshots/search.png" alt="多漫画源搜索" width="240" />
 </p>
 <p>
